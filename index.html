@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shito Ryu Itosu Kai — Gestión de Socios</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    :root { --rojo: #c0392b; --rojo-dark: #96281b; }
+    body { background: #f8f9fa; }
+    .navbar { background: var(--rojo) !important; }
+    .navbar-brand, .nav-link { color: #fff !important; }
+    .nav-link:hover { opacity: .75; }
+    .btn-primary { background: var(--rojo); border-color: var(--rojo); }
+    .btn-primary:hover, .btn-primary:focus { background: var(--rojo-dark); border-color: var(--rojo-dark); }
+    .card-rojo { border-left: 4px solid var(--rojo); }
+    .mes-p { background:#d5f5e3; color:#1e8449; border:1px solid #a9dfbf; font-size:.8rem; }
+    .mes-n { background:#fadbd8; color:#922b21; border:1px solid #f1948a; font-size:.8rem; }
+    .mes-a { background:#fef9e7; color:#7d6608; border:1px solid #f9e79f; font-size:.8rem; }
+    .view { display:none; }
+    .view.active { display:block; }
+    #login-screen { display:none; }
+  </style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="container" style="max-width:400px;margin-top:80px">
+    <div class="text-center mb-4">
+      <img src="static/logo.jpg" height="90" class="rounded-circle mb-3">
+      <h6 class="fw-bold text-secondary">Asociación Iberoamericana</h6>
+      <p class="text-muted small mb-0">"Shito Ryu Itosu Kai" de Karate y Kobudo</p>
+    </div>
+    <div class="card shadow-sm" style="border-top:4px solid var(--rojo)">
+      <div class="card-body p-4">
+        <h5 class="mb-3">Iniciar sesión</h5>
+        <div id="login-err" class="alert alert-danger d-none">Contraseña incorrecta.</div>
+        <input type="password" id="login-pw" class="form-control mb-3" placeholder="Contraseña"
+               onkeydown="if(event.key==='Enter')doLogin()">
+        <button class="btn btn-primary w-100" onclick="doLogin()">Ingresar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app-screen" style="display:none">
+  <nav class="navbar navbar-expand-lg">
+    <div class="container">
+      <a class="navbar-brand fw-bold" href="#" onclick="nav('dashboard')">
+        <img src="static/logo.jpg" height="32" class="rounded-circle me-2">Shito Ryu Itosu Kai
+      </a>
+      <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#nm">
+        <i class="bi bi-list text-white fs-4"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="nm">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item"><a class="nav-link" href="#" onclick="nav('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="#" onclick="nav('socios')"><i class="bi bi-people"></i> Socios</a></li>
+          <li class="nav-item"><a class="nav-link" href="#" onclick="nav('config')"><i class="bi bi-gear"></i> Configuración</a></li>
+        </ul>
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="#" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i> Salir</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-4 mb-5">
+    <div id="flash"></div>
+    <div id="v-dashboard" class="view"></div>
+    <div id="v-socios"    class="view"></div>
+    <div id="v-sf"        class="view"></div><!-- socio form -->
+    <div id="v-sd"        class="view"></div><!-- socio detail -->
+    <div id="v-pf"        class="view"></div><!-- pago form -->
+    <div id="v-recibo"    class="view"></div>
+    <div id="v-config"    class="view"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+// ─── Constantes ───────────────────────────────────────────────────────────────
+const MES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
+             'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const INICIO_Y = 2024, INICIO_M = 1;
+
+// ─── Estado ───────────────────────────────────────────────────────────────────
+let DB = { socios:[], pagos:[], cfg:{ cuota:0, pw:'karate2024' } };
+let LOGO = null;
+let _socioId = null;   // socio activo en detalle/pago
+let _editId  = null;   // socio en edición
+let _pagoId  = null;   // pago activo en recibo
+
+// ─── Persistencia ─────────────────────────────────────────────────────────────
+const KEY = 'asoc_ibero';
+function cargar() { const d=localStorage.getItem(KEY); if(d) DB=JSON.parse(d); }
+function guardar(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+
+// ─── Inicio ───────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  cargar();
+  // Precarga logo para PDF
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img,0,0);
+    LOGO = c.toDataURL('image/jpeg', 0.85);
+  };
+  img.src = 'static/logo.jpg';
+  checkAuth();
+});
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+function checkAuth() {
+  const ok = sessionStorage.getItem('auth')==='1';
+  document.getElementById('login-screen').style.display = ok ? 'none' : 'block';
+  document.getElementById('app-screen').style.display  = ok ? 'block': 'none';
+  if (ok) nav('dashboard');
+}
+function doLogin() {
+  const v = document.getElementById('login-pw').value;
+  if (v === DB.cfg.pw) {
+    sessionStorage.setItem('auth','1');
+    document.getElementById('login-pw').value = '';
+    document.getElementById('login-err').classList.add('d-none');
+    checkAuth();
+  } else {
+    document.getElementById('login-err').classList.remove('d-none');
+  }
+}
+function doLogout() { sessionStorage.removeItem('auth'); checkAuth(); }
+
+// ─── Navegación ───────────────────────────────────────────────────────────────
+function nav(nombre) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const el = document.getElementById('v-'+nombre);
+  if (!el) return;
+  el.classList.add('active');
+  window.scrollTo(0,0);
+  ({ dashboard:rDash, socios:rSocios, sf:rSocioForm,
+     sd:rSocioDetail, pf:rPagoForm, recibo:rRecibo, config:rConfig })[nombre]?.();
+}
+function flash(msg, tipo='success') {
+  document.getElementById('flash').innerHTML =
+    `<div class="alert alert-${tipo} alert-dismissible fade show">
+      ${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+  setTimeout(()=>document.getElementById('flash').innerHTML='', 4000);
+}
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2); }
+function fecha(iso){ const[y,m,d]=iso.slice(0,10).split('-'); return `${d}/${m}/${y}`; }
+function hoyISO(){ return new Date().toISOString().slice(0,10); }
+
+// ─── Helpers de meses ─────────────────────────────────────────────────────────
+function rango(ay,am,by,bm){
+  const r=[]; let y=ay,m=am;
+  while(y<by||(y===by&&m<=bm)){ r.push({y,m}); if(++m>12){m=1;y++;} }
+  return r;
+}
+function historial(sid){
+  const s=DB.socios.find(x=>x.id===sid);
+  const fa=new Date(s.fechaAlta+'T00:00:00');
+  let dy=fa.getFullYear(), dm=fa.getMonth()+1;
+  if(dy<INICIO_Y||(dy===INICIO_Y&&dm<INICIO_M)){ dy=INICIO_Y; dm=INICIO_M; }
+  const hoy=new Date();
+  const todos=rango(dy,dm,hoy.getFullYear(),hoy.getMonth()+1);
+  const pag={};
+  DB.pagos.filter(p=>p.sid===sid).forEach(p=>p.meses.forEach(m=>
+    pag[`${m.y}-${m.m}`]={nro:p.nro, fp:p.fp, pid:p.id}));
+  return todos.map(({y,m})=>({y,m,info:pag[`${y}-${m}`]||null}));
+}
+function adeudados(sid){ return historial(sid).filter(h=>!h.info); }
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function rDash(){
+  const activos=DB.socios.filter(s=>s.activo).sort((a,b)=>a.ap.localeCompare(b.ap));
+  const vc=DB.cfg.cuota;
+  let alDia=0,conDeuda=0,total=0;
+  const filas=activos.map(s=>{
+    const ad=adeudados(s.id), monto=ad.length*vc;
+    const up=DB.pagos.filter(p=>p.sid===s.id).sort((a,b)=>b.fp.localeCompare(a.fp))[0];
+    total+=monto; if(ad.length)conDeuda++;else alDia++;
+    const badge=ad.length===0
+      ?'<span class="badge bg-success">Al día</span>'
+      :ad.length<=2
+        ?`<span class="badge bg-warning text-dark">${ad.length} mes${ad.length>1?'es':''}</span>`
+        :`<span class="badge bg-danger">${ad.length} meses</span>`;
+    const btn=ad.length>0
+      ?`<button class="btn btn-primary btn-sm" onclick="irPago('${s.id}')"><i class="bi bi-cash-coin"></i> Pagar</button>`:'';
+    return `<tr>
+      <td><a href="#" class="fw-semibold text-decoration-none" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></td>
+      <td class="text-center">${ad.length}</td>
+      <td class="text-end">${monto>0?'$ '+monto.toLocaleString('es-AR',{minimumFractionDigits:2}):'—'}</td>
+      <td class="text-center text-muted small">${up?fecha(up.fp):'—'}</td>
+      <td class="text-center">${badge}</td>
+      <td class="text-end">${btn}</td></tr>`;
+  });
+  const alertaCuota=vc===0
+    ?`<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>
+       Configurá el valor de la cuota en <a href="#" onclick="nav('config')" class="alert-link">Configuración</a>.</div>`:''
+  document.getElementById('v-dashboard').innerHTML=`
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h4 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h4>
+      <button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>
+    </div>
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3"><div class="card card-rojo"><div class="card-body">
+        <div class="text-muted small">Total socios</div><div class="fs-2 fw-bold">${activos.length}</div>
+      </div></div></div>
+      <div class="col-6 col-md-3"><div class="card" style="border-left:4px solid #27ae60"><div class="card-body">
+        <div class="text-muted small">Al día</div><div class="fs-2 fw-bold text-success">${alDia}</div>
+      </div></div></div>
+      <div class="col-6 col-md-3"><div class="card card-rojo"><div class="card-body">
+        <div class="text-muted small">Con deuda</div><div class="fs-2 fw-bold text-danger">${conDeuda}</div>
+      </div></div></div>
+      <div class="col-6 col-md-3"><div class="card card-rojo"><div class="card-body">
+        <div class="text-muted small">Total adeudado</div>
+        <div class="fs-4 fw-bold text-danger">$ ${total.toLocaleString('es-AR',{minimumFractionDigits:2})}</div>
+      </div></div></div>
+    </div>
+    ${alertaCuota}
+    <div class="card shadow-sm">
+      <div class="card-header bg-white fw-semibold">Estado de cuotas</div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light"><tr>
+            <th>Socio</th><th class="text-center">Meses adeudados</th>
+            <th class="text-end">Monto</th><th class="text-center">Último pago</th>
+            <th class="text-center">Estado</th><th></th>
+          </tr></thead>
+          <tbody>${filas.join('')||'<tr><td colspan="6" class="text-center text-muted py-4">No hay socios activos.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ─── SOCIOS LIST ──────────────────────────────────────────────────────────────
+function rSocios(){
+  const filas=DB.socios.sort((a,b)=>a.ap.localeCompare(b.ap)).map(s=>`
+    <tr class="${s.activo?'':'text-muted'}">
+      <td><a href="#" class="fw-semibold text-decoration-none" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></td>
+      <td class="small">${s.email||'—'}</td><td class="small">${s.tel||'—'}</td>
+      <td class="text-center small">${s.fechaAlta.slice(0,7).split('-').reverse().join('/')}</td>
+      <td class="text-center">${s.activo?'<span class="badge bg-success">Activo</span>':'<span class="badge bg-secondary">Inactivo</span>'}</td>
+    </tr>`);
+  document.getElementById('v-socios').innerHTML=`
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h4 class="mb-0"><i class="bi bi-people me-2"></i>Socios</h4>
+      <button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>
+    </div>
+    <div class="card shadow-sm"><div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light"><tr>
+          <th>Apellido y nombre</th><th>Email</th><th>Teléfono</th>
+          <th class="text-center">Alta</th><th class="text-center">Estado</th>
+        </tr></thead>
+        <tbody>${filas.join('')||'<tr><td colspan="5" class="text-center text-muted py-4">No hay socios.</td></tr>'}</tbody>
+      </table>
+    </div></div>`;
+}
+
+// ─── SOCIO FORM ───────────────────────────────────────────────────────────────
+function irNuevoSocio(){ _editId=null; nav('sf'); }
+function irEditarSocio(id){ _editId=id; nav('sf'); }
+function rSocioForm(){
+  const s=_editId?DB.socios.find(x=>x.id===_editId):null;
+  document.getElementById('v-sf').innerHTML=`
+    <div class="row justify-content-center"><div class="col-md-6">
+      <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="#" onclick="nav('socios')">Socios</a></li>
+        ${s?`<li class="breadcrumb-item"><a href="#" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></li>`:''}
+        <li class="breadcrumb-item active">${s?'Editar':'Nuevo socio'}</li>
+      </ol></nav>
+      <div class="card shadow-sm">
+        <div class="card-header bg-white fw-semibold">${s?'Editar socio':'Nuevo socio'}</div>
+        <div class="card-body p-4">
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label">Nombre <span class="text-danger">*</span></label>
+              <input type="text" id="sf-nb" class="form-control" value="${s?.nb||''}" autofocus>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Apellido <span class="text-danger">*</span></label>
+              <input type="text" id="sf-ap" class="form-control" value="${s?.ap||''}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Email</label>
+              <input type="email" id="sf-email" class="form-control" value="${s?.email||''}" placeholder="Para envío de recibos">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Teléfono</label>
+              <input type="text" id="sf-tel" class="form-control" value="${s?.tel||''}">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Fecha de alta <span class="text-danger">*</span></label>
+              <input type="date" id="sf-fa" class="form-control" value="${s?.fechaAlta||hoyISO()}">
+            </div>
+            ${s?`<div class="col-12"><div class="form-check">
+              <input type="checkbox" id="sf-act" class="form-check-input" ${s.activo?'checked':''}>
+              <label class="form-check-label" for="sf-act">Socio activo</label>
+            </div></div>`:''}
+          </div>
+          <div class="d-flex gap-2 mt-4">
+            <button class="btn btn-primary" onclick="guardarSocio()"><i class="bi bi-check-lg"></i> Guardar</button>
+            <button class="btn btn-outline-secondary" onclick="${s?`irDetalle('${s.id}')`:"nav('socios')"}">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
+}
+function guardarSocio(){
+  const nb=document.getElementById('sf-nb').value.trim();
+  const ap=document.getElementById('sf-ap').value.trim();
+  const fa=document.getElementById('sf-fa').value;
+  if(!nb||!ap||!fa){ flash('Nombre, apellido y fecha son obligatorios.','danger'); return; }
+  if(_editId){
+    const s=DB.socios.find(x=>x.id===_editId);
+    s.nb=nb; s.ap=ap; s.email=document.getElementById('sf-email').value.trim();
+    s.tel=document.getElementById('sf-tel').value.trim();
+    s.fechaAlta=fa; s.activo=document.getElementById('sf-act').checked;
+    guardar(); flash('Datos actualizados.'); irDetalle(_editId);
+  } else {
+    const s={id:uid(),nb,ap,email:document.getElementById('sf-email').value.trim(),
+             tel:document.getElementById('sf-tel').value.trim(),fechaAlta:fa,activo:true};
+    DB.socios.push(s); guardar(); flash(`Socio ${nb} ${ap} agregado.`); irDetalle(s.id);
+  }
+}
+
+// ─── SOCIO DETAIL ─────────────────────────────────────────────────────────────
+function irDetalle(id){ _socioId=id; nav('sd'); }
+function rSocioDetail(){
+  const s=DB.socios.find(x=>x.id===_socioId); if(!s){nav('socios');return;}
+  const hist=historial(_socioId), vc=DB.cfg.cuota;
+  const ad=hist.filter(h=>!h.info), monto=ad.length*vc;
+  const hoy=new Date();
+  // grilla por año
+  const porAno={};
+  hist.forEach(h=>{ (porAno[h.y]=porAno[h.y]||[]).push(h); });
+  const grilla=Object.entries(porAno).map(([y,ms])=>{
+    const cells=ms.map(h=>{
+      let cls='mes-n', tit='Pendiente';
+      if(h.info){ cls='mes-p'; tit=`Rec. ${String(h.info.nro).padStart(4,'0')} — ${fecha(h.info.fp)}`; }
+      else if(h.y===hoy.getFullYear()&&h.m===hoy.getMonth()+1){ cls='mes-a'; tit='Mes actual'; }
+      return `<span class="badge ${cls} px-2 py-1" title="${tit}">${MES[h.m].slice(0,3)}</span>`;
+    }).join(' ');
+    return `<div class="mb-2"><div class="text-muted small fw-semibold mb-1">${y}</div><div class="d-flex flex-wrap gap-1">${cells}</div></div>`;
+  }).join('');
+  // historial de pagos
+  const pagos=DB.pagos.filter(p=>p.sid===_socioId).sort((a,b)=>b.fp.localeCompare(a.fp));
+  const pRows=pagos.map(p=>{
+    const ms=p.meses.map(m=>`${MES[m.m].slice(0,3)} ${m.y}`).join(', ');
+    return `<tr>
+      <td class="fw-semibold">${String(p.nro).padStart(4,'0')}</td>
+      <td>${fecha(p.fp)}</td><td class="small">${ms}</td>
+      <td class="text-end">$ ${p.monto.toLocaleString('es-AR',{minimumFractionDigits:2})}</td>
+      <td class="small text-capitalize">${p.met}</td>
+      <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="irRecibo('${p.id}')"><i class="bi bi-receipt"></i></button></td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="6" class="text-center text-muted py-3">Sin pagos registrados.</td></tr>';
+  const estadoCard=ad.length===0
+    ?'<div class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Al día</div>'
+    :`<div class="text-danger fw-semibold"><i class="bi bi-exclamation-circle me-1"></i>${ad.length} mes${ad.length>1?'es':''} adeudado${ad.length>1?'s':''}</div>
+     ${vc>0?`<div class="text-danger small">Total: $ ${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}</div>`:''}`;
+  document.getElementById('v-sd').innerHTML=`
+    <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+      <div>
+        <nav aria-label="breadcrumb"><ol class="breadcrumb mb-1">
+          <li class="breadcrumb-item"><a href="#" onclick="nav('socios')">Socios</a></li>
+          <li class="breadcrumb-item active">${s.ap}, ${s.nb}</li>
+        </ol></nav>
+        <h4 class="mb-0">${s.ap}, ${s.nb} ${!s.activo?'<span class="badge bg-secondary ms-2 fs-6">Inactivo</span>':''}</h4>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" onclick="irEditarSocio('${s.id}')"><i class="bi bi-pencil"></i> Editar</button>
+        ${ad.length>0?`<button class="btn btn-primary btn-sm" onclick="irPago('${s.id}')"><i class="bi bi-cash-coin"></i> Registrar pago</button>`:''}
+      </div>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold">Datos del socio</div>
+          <div class="card-body">
+            <dl class="row mb-0 small">
+              <dt class="col-5 text-muted">Email</dt><dd class="col-7">${s.email||'—'}</dd>
+              <dt class="col-5 text-muted">Teléfono</dt><dd class="col-7">${s.tel||'—'}</dd>
+              <dt class="col-5 text-muted">Alta</dt><dd class="col-7">${fecha(s.fechaAlta)}</dd>
+            </dl><hr>${estadoCard}
+          </div>
+        </div>
+      </div>
+      <div class="col-md-8">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold d-flex justify-content-between">
+            <span>Estado de cuotas</span>
+            <span class="small text-muted">
+              <span class="badge mes-p me-1">Pagado</span>
+              <span class="badge mes-n me-1">Pendiente</span>
+              <span class="badge mes-a">Mes actual</span>
+            </span>
+          </div>
+          <div class="card-body">${grilla||'<p class="text-muted small">Sin meses registrados.</p>'}</div>
+        </div>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-white fw-semibold">Historial de pagos</div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light"><tr>
+            <th>N° Recibo</th><th>Fecha</th><th>Meses</th>
+            <th class="text-end">Monto</th><th>Método</th><th></th>
+          </tr></thead>
+          <tbody>${pRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ─── PAGO FORM ────────────────────────────────────────────────────────────────
+function irPago(id){ _socioId=id; nav('pf'); }
+function rPagoForm(){
+  const s=DB.socios.find(x=>x.id===_socioId); if(!s){nav('dashboard');return;}
+  const vc=DB.cfg.cuota, ad=adeudados(_socioId);
+  if(!ad.length){
+    document.getElementById('v-pf').innerHTML=`
+      <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Este socio está al día.</div>
+      <button class="btn btn-outline-secondary" onclick="irDetalle('${s.id}')">Volver</button>`;
+    return;
+  }
+  const porAno={};
+  ad.forEach(h=>{ (porAno[h.y]=porAno[h.y]||[]).push(h.m); });
+  const checks=Object.entries(porAno).map(([y,ms])=>{
+    const cbs=ms.sort((a,b)=>a-b).map(m=>`
+      <div class="form-check form-check-inline">
+        <input type="checkbox" class="form-check-input mes-cb" id="m${y}${m}" value="${y}-${m}" onchange="calcMonto()">
+        <label class="form-check-label badge mes-n px-2" for="m${y}${m}" style="cursor:pointer">${MES[m]}</label>
+      </div>`).join('');
+    return `<div class="mb-2"><div class="text-muted small fw-semibold mb-1">${y}</div>${cbs}</div>`;
+  }).join('');
+  document.getElementById('v-pf').innerHTML=`
+    <div class="row justify-content-center"><div class="col-md-7">
+      <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="#" onclick="nav('socios')">Socios</a></li>
+        <li class="breadcrumb-item"><a href="#" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></li>
+        <li class="breadcrumb-item active">Registrar pago</li>
+      </ol></nav>
+      <div class="card shadow-sm">
+        <div class="card-header bg-white fw-semibold"><i class="bi bi-cash-coin me-2"></i>Registrar pago — ${s.nb} ${s.ap}</div>
+        <div class="card-body p-4">
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Meses a pagar <span class="text-danger">*</span></label>
+            <div class="d-flex gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selTodos(true)">Todos</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selTodos(false)">Ninguno</button>
+            </div>
+            ${checks}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Monto <span class="text-danger">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" id="pf-monto" class="form-control" step="0.01" min="0" placeholder="Se calcula automáticamente">
+            </div>
+            <div class="form-text">Cuota vigente: $ ${vc.toLocaleString('es-AR',{minimumFractionDigits:2})} / mes</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Fecha de pago</label>
+            <input type="date" id="pf-fecha" class="form-control" value="${hoyISO()}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Forma de pago</label>
+            <div class="d-flex gap-4">
+              <div class="form-check">
+                <input type="radio" name="pf-met" id="pf-ef" value="efectivo" class="form-check-input" checked>
+                <label class="form-check-label" for="pf-ef"><i class="bi bi-cash me-1"></i>Efectivo</label>
+              </div>
+              <div class="form-check">
+                <input type="radio" name="pf-met" id="pf-tr" value="transferencia" class="form-check-input">
+                <label class="form-check-label" for="pf-tr"><i class="bi bi-bank me-1"></i>Transferencia</label>
+              </div>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="form-label">Observaciones</label>
+            <input type="text" id="pf-notas" class="form-control" maxlength="500">
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" onclick="guardarPago()"><i class="bi bi-check-lg"></i> Registrar pago</button>
+            <button class="btn btn-outline-secondary" onclick="irDetalle('${s.id}')">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
+}
+function selTodos(v){ document.querySelectorAll('.mes-cb').forEach(c=>c.checked=v); calcMonto(); }
+function calcMonto(){
+  const n=document.querySelectorAll('.mes-cb:checked').length;
+  document.getElementById('pf-monto').value=(n*DB.cfg.cuota).toFixed(2);
+}
+function guardarPago(){
+  const meses=[...document.querySelectorAll('.mes-cb:checked')].map(c=>{
+    const[y,m]=c.value.split('-').map(Number); return{y,m};
+  });
+  if(!meses.length){ flash('Seleccioná al menos un mes.','danger'); return; }
+  const monto=parseFloat(document.getElementById('pf-monto').value.replace(',','.'));
+  if(isNaN(monto)||monto<=0){ flash('Ingresá un monto válido.','danger'); return; }
+  const fp=document.getElementById('pf-fecha').value||hoyISO();
+  const met=document.querySelector('input[name="pf-met"]:checked').value;
+  const notas=document.getElementById('pf-notas').value.trim();
+  const nro=(DB.pagos.reduce((mx,p)=>Math.max(mx,p.nro),0))+1;
+  const p={id:uid(),sid:_socioId,fp,monto,met,nro,notas,meses};
+  DB.pagos.push(p); guardar();
+  flash(`Pago registrado — Recibo N° ${String(nro).padStart(4,'0')}`);
+  irRecibo(p.id);
+}
+
+// ─── RECIBO ───────────────────────────────────────────────────────────────────
+function irRecibo(id){ _pagoId=id; nav('recibo'); }
+function rRecibo(){
+  const p=DB.pagos.find(x=>x.id===_pagoId); if(!p){nav('dashboard');return;}
+  const s=DB.socios.find(x=>x.id===p.sid);
+  const nro=String(p.nro).padStart(4,'0');
+  const ms=p.meses.map(m=>`<span class="badge mes-p me-1">${MES[m.m]} ${m.y}</span>`).join('');
+  const mailto=s.email?`mailto:${s.email}?subject=${
+    encodeURIComponent(`Recibo N° ${nro} — Asociación Iberoamericana Shito Ryu Itosu Kai`)
+  }&body=${encodeURIComponent(
+    `Estimado/a ${s.nb} ${s.ap},\n\nAdjunto encontrará su comprobante de pago N° ${nro} `+
+    `correspondiente a ${p.meses.map(m=>`${MES[m.m]} ${m.y}`).join(', ')}.\n\n`+
+    `Muchas gracias.\n\nAsociación Iberoamericana "Shito Ryu Itosu Kai" de Karate y Kobudo`
+  )}`:'';
+  document.getElementById('v-recibo').innerHTML=`
+    <div class="row justify-content-center"><div class="col-md-7">
+      <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="#" onclick="nav('socios')">Socios</a></li>
+        <li class="breadcrumb-item"><a href="#" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></li>
+        <li class="breadcrumb-item active">Recibo ${nro}</li>
+      </ol></nav>
+      <div class="card shadow-sm">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <span class="fw-semibold"><i class="bi bi-receipt me-2"></i>Recibo N° ${nro}</span>
+          <span class="badge bg-success">Registrado</span>
+        </div>
+        <div class="card-body p-4">
+          <dl class="row">
+            <dt class="col-4 text-muted">Socio</dt><dd class="col-8 fw-semibold">${s.nb} ${s.ap}</dd>
+            <dt class="col-4 text-muted">Fecha</dt><dd class="col-8">${fecha(p.fp)}</dd>
+            <dt class="col-4 text-muted">Meses</dt><dd class="col-8">${ms}</dd>
+            <dt class="col-4 text-muted">Monto</dt><dd class="col-8 fw-bold fs-5">$ ${p.monto.toLocaleString('es-AR',{minimumFractionDigits:2})}</dd>
+            <dt class="col-4 text-muted">Forma de pago</dt><dd class="col-8 text-capitalize">${p.met}</dd>
+            ${p.notas?`<dt class="col-4 text-muted">Observaciones</dt><dd class="col-8">${p.notas}</dd>`:''}
+          </dl>
+        </div>
+        <div class="card-footer bg-white d-flex gap-2 flex-wrap align-items-center">
+          <button class="btn btn-primary" onclick="genPDF('${p.id}')">
+            <i class="bi bi-file-earmark-pdf me-1"></i> Descargar PDF
+          </button>
+          ${s.email
+            ?`<a class="btn btn-outline-primary" href="${mailto}" target="_blank">
+                <i class="bi bi-envelope me-1"></i> Abrir email
+              </a>
+              <span class="text-muted small">Descargá el PDF y adjuntalo al email.</span>`
+            :`<span class="text-muted small"><i class="bi bi-info-circle me-1"></i>El socio no tiene email registrado.</span>`}
+          <button class="btn btn-outline-secondary ms-auto" onclick="irDetalle('${s.id}')">
+            <i class="bi bi-arrow-left"></i> Volver
+          </button>
+        </div>
+      </div>
+    </div></div>`;
+}
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+function rConfig(){
+  document.getElementById('v-config').innerHTML=`
+    <h4 class="mb-4"><i class="bi bi-gear me-2"></i>Configuración</h4>
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-cash me-2"></i>Cuota mensual</div>
+          <div class="card-body">
+            <label class="form-label">Valor vigente</label>
+            <div class="input-group mb-2">
+              <span class="input-group-text">$</span>
+              <input type="number" id="cfg-cuota" class="form-control" step="0.01" value="${DB.cfg.cuota}">
+            </div>
+            <div class="form-text mb-3">Actualizá cuando ajusten la cuota. Los pagos ya registrados conservan su monto.</div>
+            <button class="btn btn-primary" onclick="guardarCuota()">Guardar</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-lock me-2"></i>Contraseña de acceso</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label">Nueva contraseña</label>
+              <input type="password" id="cfg-pw1" class="form-control" minlength="6">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Confirmar</label>
+              <input type="password" id="cfg-pw2" class="form-control" minlength="6">
+            </div>
+            <button class="btn btn-primary" onclick="guardarPW()">Cambiar contraseña</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-database me-2"></i>Copia de seguridad</div>
+          <div class="card-body">
+            <p class="text-muted small">Exportá los datos para hacer un backup o restaurarlos en otro dispositivo.</p>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-primary" onclick="exportar()"><i class="bi bi-download me-1"></i>Exportar</button>
+              <label class="btn btn-outline-secondary mb-0">
+                <i class="bi bi-upload me-1"></i>Importar
+                <input type="file" accept=".json" class="d-none" onchange="importar(event)">
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+function guardarCuota(){
+  const v=parseFloat(document.getElementById('cfg-cuota').value);
+  if(isNaN(v)||v<0){ flash('Valor inválido.','danger'); return; }
+  DB.cfg.cuota=v; guardar(); flash('Cuota actualizada.');
+}
+function guardarPW(){
+  const p1=document.getElementById('cfg-pw1').value;
+  const p2=document.getElementById('cfg-pw2').value;
+  if(p1!==p2){ flash('Las contraseñas no coinciden.','danger'); return; }
+  if(p1.length<6){ flash('Mínimo 6 caracteres.','danger'); return; }
+  DB.cfg.pw=p1; guardar(); flash('Contraseña actualizada.');
+}
+function exportar(){
+  const b=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download=`asoc-ibero-backup-${hoyISO()}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function importar(e){
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    try{
+      const d=JSON.parse(ev.target.result);
+      if(!d.socios||!d.pagos) throw new Error();
+      if(!confirm(`¿Restaurar backup?\nSocios: ${d.socios.length}, Pagos: ${d.pagos.length}\nEsto reemplazará los datos actuales.`)) return;
+      DB=d; guardar(); flash('Datos restaurados.'); nav('dashboard');
+    }catch{ flash('Archivo inválido.','danger'); }
+  };
+  r.readAsText(f);
+}
+
+// ─── PDF ──────────────────────────────────────────────────────────────────────
+function genPDF(pid){
+  const p=DB.pagos.find(x=>x.id===pid);
+  const s=DB.socios.find(x=>x.id===p.sid);
+  const hist=historial(p.sid), vc=DB.cfg.cuota;
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  const nro=String(p.nro).padStart(4,'0');
+  const msStr=p.meses.map(m=>`${MES[m.m]} ${m.y}`).join(', ');
+  const metStr=p.met==='efectivo'?'Efectivo':'Transferencia bancaria';
+  const hoy=new Date();
+
+  function encabezado(y0){
+    let y=y0;
+    if(LOGO){ doc.addImage(LOGO,'JPEG',80,y,50,50); y+=55; }
+    doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('ASOCIACIÓN IBEROAMERICANA',105,y,{align:'center'}); y+=7;
+    doc.setTextColor(192,57,43);
+    doc.text('"SHITO RYU ITOSU KAI"',105,y,{align:'center'}); y+=7;
+    doc.setTextColor(0,0,0); doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    doc.text('DE KARATE Y KOBUDO',105,y,{align:'center'}); y+=5;
+    doc.setDrawColor(192,57,43); doc.setLineWidth(0.8); doc.line(20,y,190,y); y+=8;
+    return y;
+  }
+
+  // PÁGINA 1: RECIBO
+  let y=encabezado(10);
+  doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+  doc.text(`RECIBO DE PAGO N° ${nro}`,105,y,{align:'center'}); y+=10;
+  doc.setFontSize(10); doc.setFont('helvetica','normal');
+  doc.text(`Buenos Aires, ${fecha(p.fp)}`,190,y,{align:'right'}); y+=10;
+
+  const filas=[
+    ['Recibí de:',`${s.nb} ${s.ap}`],
+    ['La suma de:',`$ ${p.monto.toLocaleString('es-AR',{minimumFractionDigits:2})}`],
+    ['En concepto de:',`Cuota social — ${msStr}`],
+    ['Forma de pago:',metStr],
+  ];
+  if(p.notas) filas.push(['Observaciones:',p.notas]);
+  filas.forEach(([lbl,val])=>{
+    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.text(lbl,20,y);
+    doc.setFont('helvetica','normal');
+    const lines=doc.splitTextToSize(val,130);
+    doc.text(lines,56,y); y+=Math.max(lines.length*6,8);
+  });
+
+  y+=20;
+  doc.setDrawColor(180,180,180); doc.setLineWidth(0.3); doc.line(20,y,190,y); y+=20;
+  doc.setFontSize(10); doc.setFont('helvetica','bold');
+  doc.text('________________________',45,y,{align:'center'});
+  doc.text('________________________',165,y,{align:'center'}); y+=6;
+  doc.text('Firma del socio',45,y,{align:'center'});
+  doc.text('Tesorero / Firma y sello',165,y,{align:'center'});
+
+  // PÁGINA 2: ESTADO DE CUENTA
+  doc.addPage(); y=encabezado(10);
+  doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+  doc.text('ESTADO DE CUENTA',105,y,{align:'center'}); y+=10;
+  doc.setFontSize(11); doc.setFont('helvetica','normal');
+  doc.text(`Socio: ${s.nb} ${s.ap}`,20,y); y+=7;
+  if(hist.length){
+    const h0=hist[0];
+    doc.text(`Período: ${MES[h0.m]} ${h0.y} — ${MES[hoy.getMonth()+1]} ${hoy.getFullYear()}`,20,y); y+=10;
+  }
+
+  // Encabezado tabla
+  const cols=[20,75,115,160];
+  const rh=7;
+  doc.setFillColor(192,57,43); doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.rect(20,y,170,rh,'F');
+  doc.text('Período',cols[0]+2,y+5); doc.text('N° Recibo',cols[1]+2,y+5);
+  doc.text('Fecha de Pago',cols[2]+2,y+5); doc.text('Estado',cols[3]+2,y+5);
+  y+=rh;
+
+  doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+  let totalAd=0;
+  hist.forEach(h=>{
+    if(y>270){ doc.addPage(); y=20; }
+    const bg=h.info?[213,245,227]:(h.y===hoy.getFullYear()&&h.m===hoy.getMonth()+1?[254,249,231]:[250,219,216]);
+    doc.setFillColor(...bg); doc.rect(20,y,170,rh,'F');
+    doc.setDrawColor(200,200,200); doc.rect(20,y,170,rh,'S');
+    doc.text(`${MES[h.m]} ${h.y}`,cols[0]+2,y+5);
+    doc.text(h.info?String(h.info.nro).padStart(4,'0'):'—',cols[1]+2,y+5);
+    doc.text(h.info?fecha(h.info.fp):'—',cols[2]+2,y+5);
+    doc.text(h.info?'PAGADO':'PENDIENTE',cols[3]+2,y+5);
+    if(!h.info) totalAd++;
+    y+=rh;
+  });
+
+  doc.setFillColor(240,240,240); doc.rect(20,y,170,rh,'F');
+  doc.setFont('helvetica','bold');
+  doc.text('TOTAL ADEUDADO',cols[2]+2,y+5);
+  doc.text(`$ ${(totalAd*vc).toLocaleString('es-AR',{minimumFractionDigits:2})}`,cols[3]+2,y+5);
+  y+=rh+5;
+
+  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(120,120,120);
+  doc.text(`Documento generado el ${fecha(hoyISO())}`,105,y,{align:'center'});
+
+  doc.save(`recibo_${nro}.pdf`);
+}
+</script>
+</body>
+</html>
