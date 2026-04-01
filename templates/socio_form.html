@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% set es_edicion = socio is not none %}
+{% block title %}{{ 'Editar' if es_edicion else 'Nuevo' }} socio — Shito Ryu Itosu Kai{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <nav aria-label="breadcrumb" class="mb-3">
+      <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('socios_lista') }}">Socios</a></li>
+        {% if es_edicion %}
+          <li class="breadcrumb-item">
+            <a href="{{ url_for('socio_detalle', id=socio.id) }}">{{ socio.apellido }}, {{ socio.nombre }}</a>
+          </li>
+        {% endif %}
+        <li class="breadcrumb-item active">{{ 'Editar' if es_edicion else 'Nuevo socio' }}</li>
+      </ol>
+    </nav>
+
+    <div class="card shadow-sm">
+      <div class="card-header bg-white fw-semibold">
+        {% if es_edicion %}Editar socio{% else %}Nuevo socio{% endif %}
+      </div>
+      <div class="card-body p-4">
+        <form method="POST">
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label">Nombre <span class="text-danger">*</span></label>
+              <input type="text" name="nombre" class="form-control"
+                     value="{{ socio.nombre if es_edicion else '' }}" required autofocus>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Apellido <span class="text-danger">*</span></label>
+              <input type="text" name="apellido" class="form-control"
+                     value="{{ socio.apellido if es_edicion else '' }}" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control"
+                     value="{{ socio.email if es_edicion else '' }}"
+                     placeholder="Para envío de recibos">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Teléfono</label>
+              <input type="text" name="telefono" class="form-control"
+                     value="{{ socio.telefono if es_edicion else '' }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Fecha de alta <span class="text-danger">*</span></label>
+              <input type="date" name="fecha_alta" class="form-control"
+                     value="{{ socio.fecha_alta.isoformat() if es_edicion else today }}" required>
+            </div>
+            {% if es_edicion %}
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="activo" id="activo"
+                       {{ 'checked' if socio.activo }}>
+                <label class="form-check-label" for="activo">Socio activo</label>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check-lg"></i> Guardar
+            </button>
+            {% if es_edicion %}
+              <a href="{{ url_for('socio_detalle', id=socio.id) }}" class="btn btn-outline-secondary">Cancelar</a>
+            {% else %}
+              <a href="{{ url_for('socios_lista') }}" class="btn btn-outline-secondary">Cancelar</a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Registrar pago — {{ socio.apellido }}, {{ socio.nombre }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-7">
+    <nav aria-label="breadcrumb" class="mb-3">
+      <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('socios_lista') }}">Socios</a></li>
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('socio_detalle', id=socio.id) }}">{{ socio.apellido }}, {{ socio.nombre }}</a>
+        </li>
+        <li class="breadcrumb-item active">Registrar pago</li>
+      </ol>
+    </nav>
+
+    <div class="card shadow-sm">
+      <div class="card-header bg-white fw-semibold">
+        <i class="bi bi-cash-coin me-2"></i>Registrar pago — {{ socio.nombre }} {{ socio.apellido }}
+      </div>
+      <div class="card-body p-4">
+
+        {% if not meses_por_anio %}
+          <div class="alert alert-success">
+            <i class="bi bi-check-circle me-2"></i>Este socio está al día. No tiene meses pendientes.
+          </div>
+          <a href="{{ url_for('socio_detalle', id=socio.id) }}" class="btn btn-outline-secondary">Volver</a>
+        {% else %}
+        <form method="POST" id="pagoForm">
+
+          <!-- Selección de meses -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">
+              Meses a pagar <span class="text-danger">*</span>
+            </label>
+            <div class="d-flex gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selTodos(true)">
+                Seleccionar todos
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selTodos(false)">
+                Deseleccionar todos
+              </button>
+            </div>
+
+            {% for anio, meses in meses_por_anio.items()|sort %}
+            <div class="mb-2">
+              <div class="text-muted small fw-semibold mb-1">{{ anio }}</div>
+              <div class="d-flex flex-wrap gap-2">
+                {% for m in meses|sort %}
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input mes-cb" type="checkbox"
+                         name="meses" value="{{ anio }}-{{ m }}"
+                         id="mes{{ anio }}{{ m }}" onchange="calcularMonto()">
+                  <label class="form-check-label badge mes-pendiente px-2 py-1"
+                         for="mes{{ anio }}{{ m }}" style="cursor:pointer;font-size:.85rem">
+                    {{ MESES_ES[m] }}
+                  </label>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <!-- Monto -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              Monto <span class="text-danger">*</span>
+            </label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" name="monto" id="monto" class="form-control"
+                     step="0.01" min="0" required
+                     placeholder="Se calcula automáticamente">
+            </div>
+            <div class="form-text">
+              Cuota vigente: $ {{ "%.2f"|format(valor_cuota) }} por mes.
+              El monto se calcula automáticamente pero podés modificarlo.
+            </div>
+          </div>
+
+          <!-- Fecha -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Fecha de pago</label>
+            <input type="date" name="fecha_pago" class="form-control" value="{{ today }}">
+          </div>
+
+          <!-- Método -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Forma de pago</label>
+            <div class="d-flex gap-4">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="metodo"
+                       value="efectivo" id="metEfectivo" checked>
+                <label class="form-check-label" for="metEfectivo">
+                  <i class="bi bi-cash me-1"></i>Efectivo
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="metodo"
+                       value="transferencia" id="metTransf">
+                <label class="form-check-label" for="metTransf">
+                  <i class="bi bi-bank me-1"></i>Transferencia bancaria
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Notas -->
+          <div class="mb-4">
+            <label class="form-label">Observaciones <span class="text-muted small">(opcional)</span></label>
+            <input type="text" name="notas" class="form-control" maxlength="500">
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check-lg"></i> Registrar pago
+            </button>
+            <a href="{{ url_for('socio_detalle', id=socio.id) }}" class="btn btn-outline-secondary">
+              Cancelar
+            </a>
+          </div>
+        </form>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const valorCuota = {{ valor_cuota }};
+
+function calcularMonto() {
+  const sel = document.querySelectorAll('.mes-cb:checked').length;
+  document.getElementById('monto').value = (sel * valorCuota).toFixed(2);
+}
+
+function selTodos(checked) {
+  document.querySelectorAll('.mes-cb').forEach(cb => {
+    cb.checked = checked;
+  });
+  calcularMonto();
+}
+</script>
+{% endblock %}
