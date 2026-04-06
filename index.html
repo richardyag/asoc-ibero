@@ -87,6 +87,7 @@
 const MES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
              'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const INICIO_Y = 2024, INICIO_M = 1;
+const GIST_FILE = 'asoc-ibero-datos.json';
 
 // ─── Estado ───────────────────────────────────────────────────────────────────
 let DB = { socios:[], pagos:[], cfg:{ cuota:0, pw:'karate2024' } };
@@ -98,7 +99,7 @@ let _pagoId  = null;   // pago activo en recibo
 // ─── Persistencia ─────────────────────────────────────────────────────────────
 const KEY = 'asoc_ibero';
 function cargar() { const d=localStorage.getItem(KEY); if(d) DB=JSON.parse(d); }
-function guardar(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+function guardar(){ localStorage.setItem(KEY, JSON.stringify(DB)); syncGuardar(); }
 
 // ─── Inicio ───────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
@@ -113,6 +114,8 @@ window.addEventListener('load', () => {
   };
   img.src = 'static/logo.jpg';
   checkAuth();
+  // Sincroniza desde GitHub Gist si está configurado
+  syncCargar();
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -574,6 +577,12 @@ function rRecibo(){
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 function rConfig(){
+  const patGuardado = !!localStorage.getItem('gh_pat');
+  const gistId = localStorage.getItem('gh_gist_id')||'';
+  const syncEstado = patGuardado
+    ? `<span class="badge bg-success"><i class="bi bi-cloud-check me-1"></i>Conectado</span>`
+    : `<span class="badge bg-secondary"><i class="bi bi-cloud-slash me-1"></i>No configurado</span>`;
+
   document.getElementById('v-config').innerHTML=`
     <h4 class="mb-4"><i class="bi bi-gear me-2"></i>Configuración</h4>
     <div class="row g-4">
@@ -607,11 +616,64 @@ function rConfig(){
           </div>
         </div>
       </div>
+
+      <!-- SINCRONIZACIÓN -->
+      <div class="col-12">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-cloud-arrow-up me-2"></i>Sincronización entre dispositivos</span>
+            ${syncEstado}
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Guardá los datos en la nube usando tu cuenta de GitHub.
+              Configuralo <strong>una vez en cada dispositivo</strong> y los datos se sincronizan automáticamente.
+            </p>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Token de GitHub (Personal Access Token)</label>
+              <input type="password" id="cfg-pat" class="form-control mb-1"
+                     placeholder="${patGuardado ? '●●●●●●●●●●●● (ya configurado)' : 'ghp_xxxxxxxxxxxx'}">
+              <div class="form-text">
+                <a href="#" onclick="mostrarInstruccionesPAT()" class="text-decoration-none">
+                  <i class="bi bi-question-circle me-1"></i>¿Cómo obtener el token?
+                </a>
+              </div>
+            </div>
+            <div id="instrucciones-pat" class="alert alert-info small d-none mb-3">
+              <strong>Pasos para obtener el token:</strong>
+              <ol class="mb-0 mt-1 ps-3">
+                <li>Entrá a <strong>github.com</strong> con tu cuenta richardyag</li>
+                <li>Hacé clic en tu foto (arriba a la derecha) → <strong>Settings</strong></li>
+                <li>Bajá hasta <strong>Developer settings</strong> (al fondo del menú izquierdo)</li>
+                <li><strong>Personal access tokens</strong> → <strong>Tokens (classic)</strong></li>
+                <li><strong>Generate new token (classic)</strong></li>
+                <li>Nombre: "Asoc Ibero" — tildá solo <strong>gist</strong> — Generate</li>
+                <li>Copiá el token (empieza con <code>ghp_</code>) y pegalo acá arriba</li>
+              </ol>
+              <div class="mt-2"><strong>En el segundo dispositivo:</strong> repetí los mismos pasos pero usá el mismo token.</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-primary" onclick="conectarSync()">
+                <i class="bi bi-cloud-arrow-up me-1"></i>${patGuardado ? 'Actualizar token' : 'Conectar'}
+              </button>
+              ${patGuardado ? `
+              <button class="btn btn-outline-primary" onclick="forzarSync()">
+                <i class="bi bi-arrow-repeat me-1"></i>Sincronizar ahora
+              </button>
+              <button class="btn btn-outline-danger" onclick="desconectarSync()">
+                <i class="bi bi-x-circle me-1"></i>Desconectar
+              </button>` : ''}
+            </div>
+            ${gistId ? `<div class="text-muted small mt-2"><i class="bi bi-info-circle me-1"></i>Gist ID: <code>${gistId}</code></div>` : ''}
+          </div>
+        </div>
+      </div>
+
       <div class="col-md-6">
         <div class="card shadow-sm">
-          <div class="card-header bg-white fw-semibold"><i class="bi bi-database me-2"></i>Copia de seguridad</div>
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-database me-2"></i>Copia de seguridad local</div>
           <div class="card-body">
-            <p class="text-muted small">Exportá los datos para hacer un backup o restaurarlos en otro dispositivo.</p>
+            <p class="text-muted small">Exportá los datos como archivo JSON de respaldo.</p>
             <div class="d-flex gap-2">
               <button class="btn btn-outline-primary" onclick="exportar()"><i class="bi bi-download me-1"></i>Exportar</button>
               <label class="btn btn-outline-secondary mb-0">
@@ -655,6 +717,100 @@ function importar(e){
     }catch{ flash('Archivo inválido.','danger'); }
   };
   r.readAsText(f);
+}
+
+// ─── SINCRONIZACIÓN GITHUB GIST ──────────────────────────────────────────────
+function mostrarInstruccionesPAT(){
+  document.getElementById('instrucciones-pat').classList.toggle('d-none');
+}
+
+function ghHeaders(){
+  const pat=localStorage.getItem('gh_pat');
+  return { Authorization:`token ${pat}`, 'Content-Type':'application/json',
+           Accept:'application/vnd.github.v3+json' };
+}
+
+async function syncCargar(){
+  const pat=localStorage.getItem('gh_pat'); if(!pat) return;
+  let gistId=localStorage.getItem('gh_gist_id');
+  try{
+    if(!gistId){
+      // buscar gist existente
+      const r=await fetch('https://api.github.com/gists?per_page=100',{headers:ghHeaders()});
+      if(!r.ok) return;
+      const lista=await r.json();
+      const found=lista.find(g=>g.files?.[GIST_FILE]);
+      if(found) { gistId=found.id; localStorage.setItem('gh_gist_id',gistId); }
+    }
+    if(!gistId) return;
+    const r=await fetch(`https://api.github.com/gists/${gistId}`,{headers:ghHeaders()});
+    if(!r.ok) return;
+    const g=await r.json();
+    const content=g.files?.[GIST_FILE]?.content;
+    if(!content) return;
+    const data=JSON.parse(content);
+    if(data.socios&&data.pagos){
+      DB=data; localStorage.setItem(KEY,JSON.stringify(DB));
+      if(sessionStorage.getItem('auth')==='1') nav('dashboard');
+    }
+  }catch(e){ console.warn('syncCargar:',e); }
+}
+
+async function syncGuardar(){
+  const pat=localStorage.getItem('gh_pat'); if(!pat) return;
+  const content=JSON.stringify(DB,null,2);
+  let gistId=localStorage.getItem('gh_gist_id');
+  try{
+    if(gistId){
+      await fetch(`https://api.github.com/gists/${gistId}`,{
+        method:'PATCH', headers:ghHeaders(),
+        body:JSON.stringify({files:{[GIST_FILE]:{content}}})
+      });
+    } else {
+      const r=await fetch('https://api.github.com/gists',{
+        method:'POST', headers:ghHeaders(),
+        body:JSON.stringify({
+          description:'Datos Asociación Iberoamericana Shito Ryu Itosu Kai',
+          public:false, files:{[GIST_FILE]:{content}}
+        })
+      });
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const g=await r.json();
+      localStorage.setItem('gh_gist_id',g.id);
+    }
+  }catch(e){ console.warn('syncGuardar:',e); }
+}
+
+async function conectarSync(){
+  const pat=document.getElementById('cfg-pat').value.trim();
+  if(!pat){ flash('Ingresá el token primero.','danger'); return; }
+  // verificar token
+  const r=await fetch('https://api.github.com/user',{
+    headers:{Authorization:`token ${pat}`, Accept:'application/vnd.github.v3+json'}
+  });
+  if(!r.ok){ flash('Token inválido. Verificá que esté bien copiado.','danger'); return; }
+  const user=await r.json();
+  localStorage.setItem('gh_pat',pat);
+  flash(`Conectado como ${user.login}. Sincronizando datos...`);
+  // buscar gist existente o crear uno
+  await syncCargar();
+  await syncGuardar();
+  rConfig(); // refrescar pantalla
+}
+
+async function forzarSync(){
+  flash('Sincronizando...','info');
+  await syncCargar();
+  flash('Sincronización completada.');
+  nav('dashboard');
+}
+
+function desconectarSync(){
+  if(!confirm('¿Desconectar sincronización? Los datos locales se mantienen.')) return;
+  localStorage.removeItem('gh_pat');
+  localStorage.removeItem('gh_gist_id');
+  flash('Sincronización desconectada.');
+  rConfig();
 }
 
 // ─── PDF ──────────────────────────────────────────────────────────────────────
