@@ -59,6 +59,7 @@
         <ul class="navbar-nav me-auto">
           <li class="nav-item"><a class="nav-link" href="#" onclick="nav('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
           <li class="nav-item"><a class="nav-link" href="#" onclick="nav('socios')"><i class="bi bi-people"></i> Socios</a></li>
+          <li class="nav-item"><a class="nav-link" href="#" onclick="nav('reportes')"><i class="bi bi-file-earmark-spreadsheet"></i> Reportes</a></li>
           <li class="nav-item" id="nav-config"><a class="nav-link" href="#" onclick="nav('config')"><i class="bi bi-gear"></i> Configuración</a></li>
         </ul>
         <ul class="navbar-nav">
@@ -77,11 +78,13 @@
     <div id="v-pf"        class="view"></div><!-- pago form -->
     <div id="v-recibo"    class="view"></div>
     <div id="v-config"    class="view"></div>
+    <div id="v-reportes"  class="view"></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script>
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const MES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -165,7 +168,8 @@ function nav(nombre) {
   el.classList.add('active');
   window.scrollTo(0,0);
   ({ dashboard:rDash, socios:rSocios, sf:rSocioForm,
-     sd:rSocioDetail, pf:rPagoForm, recibo:rRecibo, config:rConfig })[nombre]?.();
+     sd:rSocioDetail, pf:rPagoForm, recibo:rRecibo, config:rConfig,
+     reportes:rReportes })[nombre]?.();
 }
 function flash(msg, tipo='success') {
   document.getElementById('flash').innerHTML =
@@ -753,6 +757,140 @@ function importar(e){
     }catch{ flash('Archivo inválido.','danger'); }
   };
   r.readAsText(f);
+}
+
+// ─── REPORTES ────────────────────────────────────────────────────────────────
+function rReportes(){
+  document.getElementById('v-reportes').innerHTML=`
+    <h4 class="mb-4"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Reportes</h4>
+    <div class="row g-4">
+
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-people me-2"></i>Padrón de socios</div>
+          <div class="card-body">
+            <p class="text-muted small">Lista completa de socios con datos de contacto y estado (activo/inactivo).</p>
+          </div>
+          <div class="card-footer bg-white d-flex gap-2">
+            <button class="btn btn-outline-success btn-sm" onclick="expCSV('socios')">
+              <i class="bi bi-filetype-csv me-1"></i>CSV
+            </button>
+            <button class="btn btn-success btn-sm" onclick="expXLSX('socios')">
+              <i class="bi bi-file-earmark-excel me-1"></i>Excel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-cash-coin me-2"></i>Aportes de cuotas</div>
+          <div class="card-body">
+            <p class="text-muted small">Todos los pagos registrados: socio, meses cubiertos, monto y método de pago.</p>
+          </div>
+          <div class="card-footer bg-white d-flex gap-2">
+            <button class="btn btn-outline-success btn-sm" onclick="expCSV('pagos')">
+              <i class="bi bi-filetype-csv me-1"></i>CSV
+            </button>
+            <button class="btn btn-success btn-sm" onclick="expXLSX('pagos')">
+              <i class="bi bi-file-earmark-excel me-1"></i>Excel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-header bg-white fw-semibold"><i class="bi bi-exclamation-triangle me-2"></i>Deuda individual</div>
+          <div class="card-body">
+            <p class="text-muted small">Estado de deuda por socio: meses adeudados, monto y fecha del último pago.</p>
+          </div>
+          <div class="card-footer bg-white d-flex gap-2">
+            <button class="btn btn-outline-success btn-sm" onclick="expCSV('deuda')">
+              <i class="bi bi-filetype-csv me-1"></i>CSV
+            </button>
+            <button class="btn btn-success btn-sm" onclick="expXLSX('deuda')">
+              <i class="bi bi-file-earmark-excel me-1"></i>Excel
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>`;
+}
+
+// ─── Generadores de datos ─────────────────────────────────────────────────────
+function dataSocios(){
+  const cab=['Apellido','Nombre','Email','Teléfono','Fecha de Alta','Estado'];
+  const filas=DB.socios
+    .sort((a,b)=>a.ap.localeCompare(b.ap))
+    .map(s=>[s.ap, s.nb, s.email||'', s.tel||'', fecha(s.fechaAlta), s.activo?'Activo':'Inactivo']);
+  return [cab,...filas];
+}
+
+function dataPagos(){
+  const cab=['N° Recibo','Fecha de Pago','Apellido','Nombre','Meses Cubiertos','Cant. Meses','Monto','Método'];
+  const filas=DB.pagos
+    .sort((a,b)=>a.fp.localeCompare(b.fp))
+    .map(p=>{
+      const s=DB.socios.find(x=>x.id===p.sid);
+      return [
+        String(p.nro).padStart(4,'0'),
+        fecha(p.fp),
+        s?.ap||'', s?.nb||'',
+        p.meses.map(m=>`${MES[m.m]} ${m.y}`).join(', '),
+        p.meses.length,
+        p.monto,
+        p.met==='efectivo'?'Efectivo':'Transferencia'
+      ];
+    });
+  return [cab,...filas];
+}
+
+function dataDeuda(){
+  const vc=DB.cfg.cuota;
+  const cab=['Apellido','Nombre','Email','Meses Adeudados','Monto Adeudado','Último Pago'];
+  const filas=DB.socios
+    .filter(s=>s.activo)
+    .sort((a,b)=>a.ap.localeCompare(b.ap))
+    .map(s=>{
+      const ad=adeudados(s.id);
+      const up=DB.pagos.filter(p=>p.sid===s.id).sort((a,b)=>b.fp.localeCompare(a.fp))[0];
+      return [s.ap, s.nb, s.email||'', ad.length, ad.length*vc, up?fecha(up.fp):'Sin pagos'];
+    });
+  return [cab,...filas];
+}
+
+// ─── Exportadores ─────────────────────────────────────────────────────────────
+const NOMBRES = { socios:'socios', pagos:'pagos', deuda:'deuda-individual' };
+const DATOS   = { socios:dataSocios, pagos:dataPagos, deuda:dataDeuda };
+
+function expCSV(tipo){
+  const data=DATOS[tipo]();
+  const csv='\uFEFF'+data.map(r=>r.map(c=>{
+    const s=String(c??'');
+    return /[,"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;
+  }).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`${NOMBRES[tipo]}-${hoyISO()}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+function expXLSX(tipo){
+  const data=DATOS[tipo]();
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  // Ancho automático de columnas
+  const cols=data[0].map((_,i)=>({
+    wch:Math.min(50, Math.max(10,...data.map(r=>String(r[i]??'').length)))
+  }));
+  ws['!cols']=cols;
+  // Estilo encabezado (color de fondo rojo) — solo disponible en versión pro,
+  // pero el ancho y el freeze ya mejoran bastante la lectura
+  XLSX.utils.book_append_sheet(wb, ws, tipo.charAt(0).toUpperCase()+tipo.slice(1));
+  XLSX.writeFile(wb,`${NOMBRES[tipo]}-${hoyISO()}.xlsx`);
 }
 
 // ─── SINCRONIZACIÓN GITHUB GIST ──────────────────────────────────────────────
