@@ -59,7 +59,7 @@
         <ul class="navbar-nav me-auto">
           <li class="nav-item"><a class="nav-link" href="#" onclick="nav('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
           <li class="nav-item"><a class="nav-link" href="#" onclick="nav('socios')"><i class="bi bi-people"></i> Socios</a></li>
-          <li class="nav-item"><a class="nav-link" href="#" onclick="nav('config')"><i class="bi bi-gear"></i> Configuración</a></li>
+          <li class="nav-item" id="nav-config"><a class="nav-link" href="#" onclick="nav('config')"><i class="bi bi-gear"></i> Configuración</a></li>
         </ul>
         <ul class="navbar-nav">
           <li class="nav-item"><a class="nav-link" href="#" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i> Salir</a></li>
@@ -90,7 +90,7 @@ const INICIO_Y = 2024, INICIO_M = 1;
 const GIST_FILE = 'asoc-ibero-datos.json';
 
 // ─── Estado ───────────────────────────────────────────────────────────────────
-let DB = { socios:[], pagos:[], cfg:{ cuota:0, pw:'karate2024' } };
+let DB = { socios:[], pagos:[], cfg:{ cuota:0, pw:'karate2024', pwVisor:'' } };
 let LOGO = null;
 let _socioId = null;   // socio activo en detalle/pago
 let _editId  = null;   // socio en edición
@@ -119,16 +119,29 @@ window.addEventListener('load', () => {
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+function isAdmin(){ return sessionStorage.getItem('rol')==='admin'; }
 function checkAuth() {
   const ok = sessionStorage.getItem('auth')==='1';
   document.getElementById('login-screen').style.display = ok ? 'none' : 'block';
   document.getElementById('app-screen').style.display  = ok ? 'block': 'none';
-  if (ok) nav('dashboard');
+  if (ok) {
+    nav('dashboard');
+    // ocultar configuración al visor
+    const nc = document.getElementById('nav-config');
+    if (nc) nc.style.display = isAdmin() ? '' : 'none';
+  }
 }
 function doLogin() {
   const v = document.getElementById('login-pw').value;
   if (v === DB.cfg.pw) {
     sessionStorage.setItem('auth','1');
+    sessionStorage.setItem('rol','admin');
+    document.getElementById('login-pw').value = '';
+    document.getElementById('login-err').classList.add('d-none');
+    checkAuth();
+  } else if (DB.cfg.pwVisor && v === DB.cfg.pwVisor) {
+    sessionStorage.setItem('auth','1');
+    sessionStorage.setItem('rol','visor');
     document.getElementById('login-pw').value = '';
     document.getElementById('login-err').classList.add('d-none');
     checkAuth();
@@ -136,10 +149,16 @@ function doLogin() {
     document.getElementById('login-err').classList.remove('d-none');
   }
 }
-function doLogout() { sessionStorage.removeItem('auth'); checkAuth(); }
+function doLogout() {
+  sessionStorage.removeItem('auth');
+  sessionStorage.removeItem('rol');
+  checkAuth();
+}
 
 // ─── Navegación ───────────────────────────────────────────────────────────────
+const SOLO_ADMIN = ['sf','pf','config'];
 function nav(nombre) {
+  if (SOLO_ADMIN.includes(nombre) && !isAdmin()) { flash('Acceso restringido al administrador.','warning'); return; }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const el = document.getElementById('v-'+nombre);
   if (!el) return;
@@ -192,7 +211,7 @@ function rDash(){
       :ad.length<=2
         ?`<span class="badge bg-warning text-dark">${ad.length} mes${ad.length>1?'es':''}</span>`
         :`<span class="badge bg-danger">${ad.length} meses</span>`;
-    const btn=ad.length>0
+    const btn=ad.length>0&&isAdmin()
       ?`<button class="btn btn-primary btn-sm" onclick="irPago('${s.id}')"><i class="bi bi-cash-coin"></i> Pagar</button>`:'';
     return `<tr>
       <td><a href="#" class="fw-semibold text-decoration-none" onclick="irDetalle('${s.id}')">${s.ap}, ${s.nb}</a></td>
@@ -208,7 +227,7 @@ function rDash(){
   document.getElementById('v-dashboard').innerHTML=`
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h4 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h4>
-      <button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>
+      ${isAdmin()?'<button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>':''}
     </div>
     <div class="row g-3 mb-4">
       <div class="col-6 col-md-3"><div class="card card-rojo"><div class="card-body">
@@ -253,7 +272,7 @@ function rSocios(){
   document.getElementById('v-socios').innerHTML=`
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h4 class="mb-0"><i class="bi bi-people me-2"></i>Socios</h4>
-      <button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>
+      ${isAdmin()?'<button class="btn btn-primary" onclick="irNuevoSocio()"><i class="bi bi-person-plus"></i> Nuevo socio</button>':''}
     </div>
     <div class="card shadow-sm"><div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
@@ -378,8 +397,8 @@ function rSocioDetail(){
         <h4 class="mb-0">${s.ap}, ${s.nb} ${!s.activo?'<span class="badge bg-secondary ms-2 fs-6">Inactivo</span>':''}</h4>
       </div>
       <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary btn-sm" onclick="irEditarSocio('${s.id}')"><i class="bi bi-pencil"></i> Editar</button>
-        ${ad.length>0?`<button class="btn btn-primary btn-sm" onclick="irPago('${s.id}')"><i class="bi bi-cash-coin"></i> Registrar pago</button>`:''}
+        ${isAdmin()?`<button class="btn btn-outline-secondary btn-sm" onclick="irEditarSocio('${s.id}')"><i class="bi bi-pencil"></i> Editar</button>`:''}
+        ${ad.length>0&&isAdmin()?`<button class="btn btn-primary btn-sm" onclick="irPago('${s.id}')"><i class="bi bi-cash-coin"></i> Registrar pago</button>`:''}
       </div>
     </div>
     <div class="row g-4">
@@ -604,15 +623,25 @@ function rConfig(){
         <div class="card shadow-sm">
           <div class="card-header bg-white fw-semibold"><i class="bi bi-lock me-2"></i>Contraseña de acceso</div>
           <div class="card-body">
+            <p class="text-muted small mb-3">Contraseña del <strong>administrador</strong> (acceso completo).</p>
             <div class="mb-3">
-              <label class="form-label">Nueva contraseña</label>
+              <label class="form-label">Nueva contraseña admin</label>
               <input type="password" id="cfg-pw1" class="form-control" minlength="6">
             </div>
             <div class="mb-3">
               <label class="form-label">Confirmar</label>
               <input type="password" id="cfg-pw2" class="form-control" minlength="6">
             </div>
-            <button class="btn btn-primary" onclick="guardarPW()">Cambiar contraseña</button>
+            <button class="btn btn-primary mb-4" onclick="guardarPW()">Cambiar contraseña admin</button>
+            <hr>
+            <p class="text-muted small mb-3">Contraseña del <strong>visor</strong> (solo lectura, sin editar).</p>
+            <div class="mb-3">
+              <label class="form-label">Contraseña visor</label>
+              <input type="password" id="cfg-pwv" class="form-control"
+                     placeholder="${DB.cfg.pwVisor ? '●●●●●●●● (configurada)' : 'Sin contraseña visor'}">
+              <div class="form-text">Dejá vacío para desactivar el acceso visor.</div>
+            </div>
+            <button class="btn btn-outline-primary" onclick="guardarPWVisor()">Guardar contraseña visor</button>
           </div>
         </div>
       </div>
@@ -696,7 +725,14 @@ function guardarPW(){
   const p2=document.getElementById('cfg-pw2').value;
   if(p1!==p2){ flash('Las contraseñas no coinciden.','danger'); return; }
   if(p1.length<6){ flash('Mínimo 6 caracteres.','danger'); return; }
-  DB.cfg.pw=p1; guardar(); flash('Contraseña actualizada.');
+  DB.cfg.pw=p1; guardar(); flash('Contraseña de administrador actualizada.');
+}
+function guardarPWVisor(){
+  const v=document.getElementById('cfg-pwv').value.trim();
+  if(v&&v.length<4){ flash('Mínimo 4 caracteres.','danger'); return; }
+  DB.cfg.pwVisor=v; guardar();
+  flash(v ? 'Contraseña visor guardada.' : 'Acceso visor desactivado.');
+  rConfig();
 }
 function exportar(){
   const b=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
