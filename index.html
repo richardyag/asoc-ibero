@@ -102,7 +102,11 @@ let _pagoId  = null;   // pago activo en recibo
 // ─── Persistencia ─────────────────────────────────────────────────────────────
 const KEY = 'asoc_ibero';
 function cargar() { const d=localStorage.getItem(KEY); if(d) DB=JSON.parse(d); }
-function guardar(){ localStorage.setItem(KEY, JSON.stringify(DB)); syncGuardar(); }
+function guardar(){
+  DB.ts = Date.now(); // marca de tiempo para resolver conflictos
+  localStorage.setItem(KEY, JSON.stringify(DB));
+  syncGuardar();
+}
 
 // ─── Inicio ───────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
@@ -924,8 +928,15 @@ async function syncCargar(){
     if(!content) return;
     const data=JSON.parse(content);
     if(data.socios&&data.pagos){
-      DB=data; localStorage.setItem(KEY,JSON.stringify(DB));
-      if(sessionStorage.getItem('auth')==='1') nav('dashboard');
+      const localTs = DB.ts || 0;
+      const gistTs  = data.ts || 0;
+      if(gistTs > localTs){
+        DB=data; localStorage.setItem(KEY,JSON.stringify(DB));
+        if(sessionStorage.getItem('auth')==='1') nav('dashboard');
+      } else if(localTs > gistTs){
+        syncGuardar(); // datos locales más nuevos → subir al gist
+      }
+      // si son iguales no hay nada que hacer
     }
   }catch(e){ console.warn('syncCargar:',e); }
 }
